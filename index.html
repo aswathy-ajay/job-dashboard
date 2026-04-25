@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>G Ajaykumar - Job Applications Dashboard</title>
+    <link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+
+<div class="header">
+    <h1 id="header-title">Loading...</h1>
+    <p id="header-credentials"></p>
+    <p id="header-meta" style="margin-top:8px; opacity:0.7;"></p>
+</div>
+
+<div class="container">
+    <div class="summary-bar">
+        <div class="summary-card"><div class="number" id="stat-total">-</div><div class="label">Matched Jobs</div></div>
+        <div class="summary-card"><div class="number" id="stat-highest">-</div><div class="label">Highest Match</div></div>
+        <div class="summary-card"><div class="number" id="stat-countries">-</div><div class="label">Countries</div></div>
+        <div class="summary-card"><div class="number" id="stat-types">-</div><div class="label">Role Types</div></div>
+        <div class="summary-card"><div class="number" style="font-size:1.2em" id="tracker-stats">0 Applied | 0 Interview | 0 Offer</div><div class="label">Application Tracker</div></div>
+    </div>
+
+    <div class="filters" id="filters-container">
+        <label>Loading filters...</label>
+    </div>
+
+    <div id="loading" class="loading">Loading dashboard data...</div>
+    <div id="jobs-container"></div>
+</div>
+
+<div class="footer">
+    <div style="margin-bottom:16px">
+        <button onclick="exportTracker()" style="background:#1a3a5c;color:white;padding:10px 24px;border:none;border-radius:8px;font-size:0.9em;cursor:pointer;margin:4px">Export Tracker Data</button>
+        <button onclick="clearTracker()" style="background:#e74c3c;color:white;padding:10px 24px;border:none;border-radius:8px;font-size:0.9em;cursor:pointer;margin:4px">Reset All Tracker</button>
+    </div>
+    <p>Jobs sourced from GulfTalent, Bayt, LinkedIn, NaukriGulf | Auto-updated daily via GitHub Actions</p>
+</div>
+
+<script src="js/downloads.js"></script>
+<script src="js/tracker.js"></script>
+<script src="js/filters.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>

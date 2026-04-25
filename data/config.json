@@ -1,0 +1,39 @@
+{
+  "person": {
+    "name": "G AJAYKUMAR",
+    "credentials": "PMP | MCInstCES | Chartered Engineer | 34+ Years Experience",
+    "fullName": "Ajaykumar Gangadharan",
+    "contact": {
+      "location": "Trivandrum, Kerala, India",
+      "phone": "+91-7907587824",
+      "email": "ajay_aditya@yahoo.co.in",
+      "linkedin": "www.linkedin.com/in/ajaykumar-pmp"
+    }
+  },
+  "dashboard": {
+    "title": "G AJAYKUMAR - Job Application Dashboard",
+    "targetRegions": "UAE, Oman, Qatar, Saudi Arabia, India",
+    "generatedDate": "25 April 2026"
+  },
+  "sections": [
+    { "id": "PD", "label": "A. Project Director Roles", "order": 1 },
+    { "id": "SPM", "label": "B. Senior Project Manager Roles", "order": 2 },
+    { "id": "OH", "label": "C. Operations Head / Construction Manager Roles", "order": 3 }
+  ],
+  "trackerStatuses": [
+    { "value": "not-applied", "label": "Not Applied" },
+    { "value": "applied", "label": "Applied" },
+    { "value": "shortlisted", "label": "Shortlisted" },
+    { "value": "interview", "label": "Interview" },
+    { "value": "offer", "label": "Offer" },
+    { "value": "rejected", "label": "Rejected" }
+  ],
+  "searchTerms": [
+    "Project Director Construction",
+    "Senior Project Manager Infrastructure",
+    "Construction Manager Water",
+    "Project Director Utilities",
+    "Senior PM Water Wastewater"
+  ],
+  "targetCountries": ["UAE", "Oman", "Qatar", "Saudi", "India"]
+}
