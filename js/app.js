@@ -1,6 +1,11 @@
 // ==================== GLOBAL STATE ====================
 window.appState = { config: null, jobs: [], cvTemplates: {} };
 
+function escapeAttr(str) {
+    if (!str) return '#';
+    return str.replace(/&/g, '&amp;').replace(/"/g, '&quot;');
+}
+
 // ==================== BOOT ====================
 document.addEventListener('DOMContentLoaded', async function () {
     try {
@@ -154,7 +159,9 @@ function createJobCard(job) {
         '<div class="job-description"><h4>Key Requirements:</h4><ul>' + reqHTML + '</ul></div>' +
         matchAnalysisHTML +
         '<div class="btn-group">' +
-            '<a href="' + job.applyUrl + '" target="_blank" class="btn btn-apply">Apply &#8599;</a>' +
+            '<a href="' + escapeAttr(job.applyUrl) + '" target="_blank" rel="noopener noreferrer" class="btn btn-apply">Apply &#8599;</a>' +
+        '</div>' +
+        '<div class="btn-group" style="margin-top:6px">' +
             downloadHTML +
         '</div>';
 
