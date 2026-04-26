@@ -20,6 +20,7 @@
         <div class="summary-card"><div class="number" id="stat-highest">-</div><div class="label">Highest Match</div></div>
         <div class="summary-card"><div class="number" id="stat-countries">-</div><div class="label">Countries</div></div>
         <div class="summary-card"><div class="number" id="stat-types">-</div><div class="label">Role Types</div></div>
+        <div class="summary-card"><div class="number" id="stat-unapplied">-</div><div class="label">Unapplied</div></div>
         <div class="summary-card"><div class="number" style="font-size:1.2em" id="tracker-stats">0 Applied | 0 Interview | 0 Offer</div><div class="label">Application Tracker</div></div>
     </div>
 
@@ -27,6 +28,7 @@
         <label>Loading filters...</label>
     </div>
 
+    <div id="pause-warning" class="pause-warning" style="display:none"></div>
     <div id="loading" class="loading">Loading dashboard data...</div>
     <div id="jobs-container"></div>
 </div>
@@ -34,9 +36,11 @@
 <div class="footer">
     <div style="margin-bottom:16px">
         <button onclick="exportTracker()" style="background:#1a3a5c;color:white;padding:10px 24px;border:none;border-radius:8px;font-size:0.9em;cursor:pointer;margin:4px">Export Tracker Data</button>
+        <button onclick="syncStatusToGitHub()" style="background:#27ae60;color:white;padding:10px 24px;border:none;border-radius:8px;font-size:0.9em;cursor:pointer;margin:4px">Sync Status to GitHub</button>
+        <button onclick="downloadStatusJSON()" style="background:#f39c12;color:white;padding:10px 24px;border:none;border-radius:8px;font-size:0.9em;cursor:pointer;margin:4px">Download Status JSON</button>
         <button onclick="clearTracker()" style="background:#e74c3c;color:white;padding:10px 24px;border:none;border-radius:8px;font-size:0.9em;cursor:pointer;margin:4px">Reset All Tracker</button>
     </div>
-    <p>Jobs sourced from GulfTalent, Bayt, LinkedIn, NaukriGulf | Auto-updated daily via GitHub Actions</p>
+    <p>Jobs sourced from GulfTalent, Bayt, LinkedIn, NaukriGulf, Monster.com | Auto-updated daily via GitHub Actions | Scored by Claude AI</p>
 </div>
 
 <script src="js/downloads.js"></script>

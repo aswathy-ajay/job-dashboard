@@ -1,6 +1,6 @@
 """
 Job Board Scraper for Construction/Infrastructure Roles
-Scrapes: GulfTalent, LinkedIn Jobs, Bayt.com, NaukriGulf
+Scrapes: GulfTalent, LinkedIn Jobs, Bayt.com, NaukriGulf, Monster.com
 Outputs: scraped_jobs.json (new jobs not already in data/jobs.json)
 """
 
@@ -58,9 +58,9 @@ def matches_profile(title, description, profile):
     """Pre-filter: check if job matches candidate profile using keywords."""
     text = (title + ' ' + description).lower()
 
-    # Check exclude keywords
+    # Check exclude keywords (whole-word match to avoid false positives like 'IT' in 'united')
     for kw in profile.get('excludeKeywords', []):
-        if kw.lower() in text:
+        if re.search(r'\b' + re.escape(kw.lower()) + r'\b', text):
             return False
 
     # Check if title matches target roles
@@ -69,9 +69,17 @@ def matches_profile(title, description, profile):
     if not role_match:
         return False
 
-    # Check industry relevance
+    # Check industry relevance (if description is very short, pass on role match alone
+    # since some job boards like LinkedIn have minimal card text)
     industry_match = any(ind.lower() in text for ind in profile.get('industries', []))
-    return industry_match
+    if industry_match:
+        return True
+
+    # For short descriptions (e.g. LinkedIn cards), accept if role matched and no exclusions
+    if len(description.strip()) < 150:
+        return True
+
+    return False
 
 
 def safe_request(url, max_retries=3, delay=2):
@@ -357,6 +365,85 @@ def scrape_linkedin(profile):
     return jobs
 
 
+# ==================== MONSTER SCRAPER ====================
+def scrape_monster(profile):
+    """Scrape Monster.com for matching jobs."""
+    jobs = []
+    search_queries = [
+        'project-director-construction',
+        'senior-project-manager-infrastructure',
+        'construction-manager-water',
+        'project-director-utilities',
+        'senior-project-manager-water-wastewater',
+    ]
+    locations = [
+        ('UAE', 'UAE'),
+        ('Saudi', 'Saudi Arabia'),
+        ('Oman', 'Oman'),
+        ('Qatar', 'Qatar'),
+        ('India', 'India'),
+    ]
+
+    for query in search_queries:
+        for country_name, loc_query in locations:
+            url = f"https://www.monster.com/jobs/search?q={query}&where={loc_query.replace(' ', '+')}"
+            logger.info(f"Monster: Scraping {url}")
+            resp = safe_request(url, delay=3)
+            if not resp:
+                continue
+
+            soup = BeautifulSoup(resp.text, 'lxml')
+            listings = soup.select('[data-testid="svx-job-card"], .job-cardstyle__JobCardComponent, article[class*="JobCard"], div[class*="job-search-card"]')
+
+            if not listings:
+                listings = soup.select('a[href*="/job-openings/"]')
+
+            for item in listings[:15]:
+                try:
+                    title_el = item.select_one('h2, [data-testid="jobTitle"], .title a, a[class*="title"]')
+                    if not title_el:
+                        continue
+                    title = title_el.get_text(strip=True)
+                    if not title or len(title) < 5:
+                        continue
+
+                    company_el = item.select_one('[data-testid="company"], .company span, span[class*="company"]')
+                    company = company_el.get_text(strip=True) if company_el else 'Confidential'
+
+                    location_el = item.select_one('[data-testid="jobLocation"], .location, span[class*="location"]')
+                    location = location_el.get_text(strip=True) if location_el else country_name
+
+                    link = ''
+                    link_el = item.select_one('a[href*="/job-openings/"], a[href*="monster.com"]')
+                    if link_el:
+                        link = link_el.get('href', '')
+                    elif item.name == 'a':
+                        link = item.get('href', '')
+                    if link and not link.startswith('http'):
+                        link = 'https://www.monster.com' + link
+
+                    country = detect_country(location) if location != country_name else country_name
+                    description = item.get_text(' ', strip=True)
+
+                    if matches_profile(title, description, profile):
+                        jobs.append({
+                            'title': title,
+                            'company': company,
+                            'location': location,
+                            'country': country,
+                            'datePosted': datetime.now().strftime('%b %Y'),
+                            'applyUrl': link,
+                            'source': 'Monster',
+                            'requirements': [description[:200] + '...' if len(description) > 200 else description],
+                            'tags': extract_tags(title + ' ' + description),
+                        })
+                except Exception as e:
+                    logger.debug(f"Error parsing Monster listing: {e}")
+
+    logger.info(f"Monster: Found {len(jobs)} matching jobs")
+    return jobs
+
+
 # ==================== UTILITIES ====================
 def detect_country(location_str):
     """Detect country from location string."""
@@ -432,6 +519,7 @@ def main():
         ('Bayt', scrape_bayt),
         ('NaukriGulf', scrape_naukrigulf),
         ('LinkedIn', scrape_linkedin),
+        ('Monster', scrape_monster),
     ]
 
     for name, scraper_fn in scrapers:

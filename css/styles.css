@@ -62,6 +62,7 @@ details summary { color: #2d6a9f; font-weight: 600; font-size: 0.9em; margin: 8p
 .stats-applied { color: #2d6a9f; font-weight: 700; }
 .stats-interview { color: #8e44ad; font-weight: 700; }
 .stats-offer { color: #27ae60; font-weight: 700; }
+.pause-warning { background: #fff3cd; border: 2px solid #ffc107; border-radius: 10px; padding: 20px; margin-bottom: 24px; text-align: center; font-size: 1.1em; font-weight: 600; color: #856404; }
 .loading { text-align: center; padding: 60px 20px; color: #888; font-size: 1.2em; }
 .error { text-align: center; padding: 40px 20px; color: #e74c3c; font-size: 1.1em; }
 @media (max-width: 600px) {

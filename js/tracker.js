@@ -50,6 +50,10 @@ function updateTracker(jobId, status) {
     data[jobId] = { status: status, updatedAt: new Date().toISOString() };
     saveTrackerData(data);
 
+    // Also update the job's status in appState for consistency
+    var job = window.appState.jobs.find(function (j) { return j.id === jobId; });
+    if (job) { job.status = status; }
+
     const sel = document.getElementById('tracker-' + jobId);
     if (sel) { sel.className = 'tracker-select status-' + status; }
 
@@ -61,6 +65,7 @@ function updateTracker(jobId, status) {
         }
     }
     updateSummaryStats();
+    updateUnappliedStat();
 }
 
 function updateSummaryStats() {
@@ -77,6 +82,79 @@ function updateSummaryStats() {
             '<span class="stats-interview">' + interview + ' Interview</span> | ' +
             '<span class="stats-offer">' + offer + ' Offer</span>';
     }
+}
+
+function updateUnappliedStat() {
+    var jobs = window.appState.jobs;
+    var trackerData = getTrackerData();
+    var unapplied = 0;
+    jobs.forEach(function (j) {
+        var tracked = trackerData[j.id];
+        var status = (tracked && tracked.status) ? tracked.status : (j.status || 'not-applied');
+        if (status === 'not-applied') unapplied++;
+    });
+    var el = document.getElementById('stat-unapplied');
+    if (el) el.textContent = unapplied;
+}
+
+// ==================== SYNC STATUS TO GITHUB ====================
+async function syncStatusToGitHub() {
+    var token = localStorage.getItem('githubPAT');
+    if (!token) {
+        token = prompt('Enter your GitHub Personal Access Token (fine-grained, contents:write permission) to sync status:');
+        if (!token) return;
+        localStorage.setItem('githubPAT', token);
+    }
+
+    var repo = window.appState.config.dashboard.repo;
+    if (!repo) {
+        repo = prompt('Enter your GitHub repo (e.g., aswathy-ajay/job-dashboard):');
+        if (!repo) return;
+    }
+
+    var trackerData = getTrackerData();
+    var statusPayload = JSON.stringify({ statuses: trackerData, lastSyncedAt: new Date().toISOString() }, null, 2);
+    var contentBase64 = btoa(unescape(encodeURIComponent(statusPayload)));
+
+    var apiUrl = 'https://api.github.com/repos/' + repo + '/contents/data/status.json';
+
+    try {
+        // Get current file SHA if it exists
+        var sha = null;
+        var existing = await fetch(apiUrl, { headers: { Authorization: 'token ' + token } });
+        if (existing.ok) {
+            var existingData = await existing.json();
+            sha = existingData.sha;
+        }
+
+        var body = { message: 'Sync tracker status', content: contentBase64 };
+        if (sha) body.sha = sha;
+
+        var resp = await fetch(apiUrl, {
+            method: 'PUT',
+            headers: { Authorization: 'token ' + token, 'Content-Type': 'application/json' },
+            body: JSON.stringify(body)
+        });
+
+        if (resp.ok) {
+            alert('Status synced to GitHub successfully!');
+        } else {
+            var err = await resp.json();
+            alert('Sync failed: ' + (err.message || resp.status));
+            // If auth failed, clear the stored token
+            if (resp.status === 401 || resp.status === 403) {
+                localStorage.removeItem('githubPAT');
+            }
+        }
+    } catch (e) {
+        alert('Sync error: ' + e.message);
+    }
+}
+
+function downloadStatusJSON() {
+    var trackerData = getTrackerData();
+    var payload = JSON.stringify({ statuses: trackerData, lastSyncedAt: new Date().toISOString() }, null, 2);
+    downloadBlob(payload, 'status.json', 'application/json');
 }
 
 // ==================== EXPORT & RESET ====================

@@ -25,6 +25,7 @@ document.addEventListener('DOMContentLoaded', async function () {
         renderJobs(jobsData.jobs, config);
         initTracker();
         initFilters(jobsData.jobs, config);
+        checkPauseWarning();
         showLoading(false);
     } catch (err) {
         showLoading(false);
@@ -60,11 +61,28 @@ function renderSummaryBar(jobs, config) {
     const countries = new Set(jobs.map(j => j.country));
     const types = new Set(jobs.map(j => j.type));
     const highestMatch = scoredJobs.length > 0 ? Math.max(...scoredJobs.map(j => j.matchPercent)) : 0;
+    const unapplied = jobs.filter(j => !j.status || j.status === 'not-applied').length;
 
     document.getElementById('stat-total').textContent = jobs.length;
     document.getElementById('stat-highest').textContent = highestMatch + '%';
     document.getElementById('stat-countries').textContent = countries.size;
     document.getElementById('stat-types').textContent = types.size;
+    document.getElementById('stat-unapplied').textContent = unapplied;
+}
+
+// ==================== PAUSE WARNING ====================
+async function checkPauseWarning() {
+    try {
+        const flags = await fetchJSON('data/dashboard_flags.json');
+        const warningEl = document.getElementById('pause-warning');
+        if (flags.paused && warningEl) {
+            warningEl.style.display = 'block';
+            warningEl.innerHTML = '\u26A0\uFE0F <strong>Job hunting is PAUSED.</strong> You have ' +
+                flags.unappliedCount + ' unapplied jobs (cap: 100). Please apply to more jobs before new ones are added.';
+        }
+    } catch (e) {
+        // No flags file = not paused, ignore
+    }
 }
 
 // ==================== RENDER JOBS ====================
@@ -72,9 +90,10 @@ function renderJobs(jobs, config) {
     const container = document.getElementById('jobs-container');
     container.innerHTML = '';
 
-    // Group by section
+    // Group by section, sorted by matchPercent descending within each
     config.sections.forEach(function (section) {
-        const sectionJobs = jobs.filter(j => j.type === section.id);
+        const sectionJobs = jobs.filter(j => j.type === section.id && j.matchPercent !== null)
+            .sort(function (a, b) { return b.matchPercent - a.matchPercent; });
         if (sectionJobs.length === 0) return;
 
         // Section title
