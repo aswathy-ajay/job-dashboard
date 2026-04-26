@@ -16,6 +16,54 @@ from pathlib import Path
 import requests
 from bs4 import BeautifulSoup
 
+# Playwright for JS-rendered sites (GulfTalent, NaukriGulf, Monster)
+_playwright = None
+_browser = None
+
+
+def get_browser():
+    """Lazy-init Playwright browser (shared across all JS scrapers)."""
+    global _playwright, _browser
+    if _browser is None:
+        from playwright.sync_api import sync_playwright
+        _playwright = sync_playwright().start()
+        _browser = _playwright.chromium.launch(headless=True)
+        logger.info("Playwright browser launched")
+    return _browser
+
+
+def close_browser():
+    """Clean up Playwright resources."""
+    global _playwright, _browser
+    if _browser:
+        _browser.close()
+        _browser = None
+    if _playwright:
+        _playwright.stop()
+        _playwright = None
+
+
+def browser_get_page(url, wait_selector=None, wait_time=5):
+    """Load a page with Playwright headless browser, return HTML after JS renders."""
+    browser = get_browser()
+    page = browser.new_page()
+    try:
+        page.goto(url, timeout=30000, wait_until='domcontentloaded')
+        if wait_selector:
+            try:
+                page.wait_for_selector(wait_selector, timeout=10000)
+            except Exception:
+                pass  # Selector may not exist, continue with what we have
+        else:
+            page.wait_for_timeout(wait_time * 1000)
+        html = page.content()
+        return html
+    except Exception as e:
+        logger.warning(f"Playwright error for {url}: {e}")
+        return None
+    finally:
+        page.close()
+
 # Setup
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -25,10 +73,23 @@ DATA_DIR = SCRIPT_DIR.parent / 'data'
 OUTPUT_FILE = SCRIPT_DIR / 'scraped_jobs.json'
 
 HEADERS = {
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
+    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
     'Accept-Language': 'en-US,en;q=0.9',
-    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+    'Accept-Encoding': 'gzip, deflate, br',
+    'Connection': 'keep-alive',
+    'Upgrade-Insecure-Requests': '1',
+    'Sec-Fetch-Dest': 'document',
+    'Sec-Fetch-Mode': 'navigate',
+    'Sec-Fetch-Site': 'none',
+    'Sec-Fetch-User': '?1',
+    'sec-ch-ua': '"Google Chrome";v="125", "Chromium";v="125", "Not.A/Brand";v="24"',
+    'sec-ch-ua-mobile': '?0',
+    'sec-ch-ua-platform': '"Windows"',
 }
+
+# Shared session per domain to maintain cookies (required by Akamai/Cloudflare)
+_sessions = {}
 
 
 def load_profile():
@@ -82,12 +143,34 @@ def matches_profile(title, description, profile):
     return False
 
 
-def safe_request(url, max_retries=3, delay=2):
-    """Make HTTP request with retries and rate limiting."""
+def get_session(domain):
+    """Get or create a persistent session for a domain (keeps cookies)."""
+    if domain not in _sessions:
+        s = requests.Session()
+        s.headers.update(HEADERS)
+        # Visit the homepage first to pick up cookies (Akamai/Cloudflare requirement)
+        try:
+            logger.info(f"Initializing session for {domain}...")
+            s.get(f"https://www.{domain}", timeout=15)
+            time.sleep(2)
+        except Exception as e:
+            logger.warning(f"Could not init session for {domain}: {e}")
+        _sessions[domain] = s
+    return _sessions[domain]
+
+
+def safe_request(url, max_retries=3, delay=2, domain=None):
+    """Make HTTP request with retries, rate limiting, and session cookies."""
+    if domain:
+        session = get_session(domain)
+    else:
+        session = requests.Session()
+        session.headers.update(HEADERS)
+
     for attempt in range(max_retries):
         try:
             time.sleep(delay)
-            resp = requests.get(url, headers=HEADERS, timeout=30)
+            resp = session.get(url, timeout=30)
             if resp.status_code == 200:
                 return resp
             elif resp.status_code == 429:
@@ -101,9 +184,9 @@ def safe_request(url, max_retries=3, delay=2):
     return None
 
 
-# ==================== GULFTALENT SCRAPER ====================
+# ==================== GULFTALENT SCRAPER (Playwright) ====================
 def scrape_gulftalent(profile):
-    """Scrape GulfTalent for matching jobs."""
+    """Scrape GulfTalent for matching jobs using headless browser."""
     jobs = []
     countries = {
         'UAE': 'uae',
@@ -115,42 +198,39 @@ def scrape_gulftalent(profile):
         'project-director',
         'senior-project-manager',
         'construction-manager',
-        'project-manager-infrastructure',
-        'project-manager-water',
     ]
 
     for country_name, country_slug in countries.items():
         for term in search_terms:
             url = f"https://www.gulftalent.com/{country_slug}/jobs/title/{term}"
             logger.info(f"GulfTalent: Scraping {url}")
-            resp = safe_request(url)
-            if not resp:
+            html = browser_get_page(url, wait_selector='.card-job, .job-listing, a[href*="/jobs/"]')
+            if not html:
                 continue
 
-            soup = BeautifulSoup(resp.text, 'lxml')
-            listings = soup.select('.job-listing, .listing-item, article.job, div[class*="job"]')
-
+            soup = BeautifulSoup(html, 'lxml')
+            # GulfTalent renders job cards via Angular — look for links to individual job pages
+            listings = soup.select('a[href*="/jobs/"][href*="-"]')
             if not listings:
-                # Try alternative selectors
-                listings = soup.find_all('a', href=re.compile(r'/jobs/.*-\d+'))
+                listings = soup.select('.card-job, .job-listing, div[class*="job"]')
 
-            for item in listings[:20]:  # Limit per page
+            for item in listings[:20]:
                 try:
-                    # Extract title
-                    title_el = item.select_one('h2, h3, .job-title, .title') or item
-                    title = title_el.get_text(strip=True) if title_el else ''
+                    # Extract title from link text or child heading
+                    title_el = item.select_one('h2, h3, .job-title, .title')
+                    if title_el:
+                        title = title_el.get_text(strip=True)
+                    else:
+                        title = item.get_text(strip=True)
                     if not title or len(title) < 5:
                         continue
 
-                    # Extract company
                     company_el = item.select_one('.company, .employer, span[class*="company"]')
                     company = company_el.get_text(strip=True) if company_el else 'Confidential'
 
-                    # Extract location
                     location_el = item.select_one('.location, span[class*="location"]')
                     location = location_el.get_text(strip=True) if location_el else country_name
 
-                    # Extract link
                     link = item.get('href') or ''
                     if not link:
                         link_el = item.select_one('a[href*="/jobs/"]')
@@ -158,7 +238,6 @@ def scrape_gulftalent(profile):
                     if link and not link.startswith('http'):
                         link = 'https://www.gulftalent.com' + link
 
-                    # Extract date
                     date_el = item.select_one('.date, time, span[class*="date"]')
                     date_posted = date_el.get_text(strip=True) if date_el else datetime.now().strftime('%b %Y')
 
@@ -178,6 +257,7 @@ def scrape_gulftalent(profile):
                         })
                 except Exception as e:
                     logger.debug(f"Error parsing GulfTalent listing: {e}")
+            time.sleep(2)
 
     logger.info(f"GulfTalent: Found {len(jobs)} matching jobs")
     return jobs
@@ -196,7 +276,7 @@ def scrape_bayt(profile):
     for query in search_queries:
         url = f"https://www.bayt.com/en/international/jobs/{query}-jobs/"
         logger.info(f"Bayt: Scraping {url}")
-        resp = safe_request(url)
+        resp = safe_request(url, domain='bayt.com')
         if not resp:
             continue
 
@@ -242,9 +322,9 @@ def scrape_bayt(profile):
     return jobs
 
 
-# ==================== NAUKRIGULF SCRAPER ====================
+# ==================== NAUKRIGULF SCRAPER (Playwright) ====================
 def scrape_naukrigulf(profile):
-    """Scrape NaukriGulf for matching jobs."""
+    """Scrape NaukriGulf for matching jobs using headless browser."""
     jobs = []
     search_queries = [
         'project-director-construction',
@@ -255,11 +335,11 @@ def scrape_naukrigulf(profile):
     for query in search_queries:
         url = f"https://www.naukrigulf.com/{query}-jobs"
         logger.info(f"NaukriGulf: Scraping {url}")
-        resp = safe_request(url)
-        if not resp:
+        html = browser_get_page(url, wait_selector='.srp-jobtuple, article[class*="job"], div[class*="jobTuple"]')
+        if not html:
             continue
 
-        soup = BeautifulSoup(resp.text, 'lxml')
+        soup = BeautifulSoup(html, 'lxml')
         listings = soup.select('.srp-jobtuple, article, div[class*="jobTuple"]')
 
         for item in listings[:15]:
@@ -296,6 +376,7 @@ def scrape_naukrigulf(profile):
                     })
             except Exception as e:
                 logger.debug(f"Error parsing NaukriGulf listing: {e}")
+        time.sleep(2)
 
     logger.info(f"NaukriGulf: Found {len(jobs)} matching jobs")
     return jobs
@@ -321,7 +402,7 @@ def scrape_linkedin(profile):
         for country_name, geo_id in locations:
             url = f"https://www.linkedin.com/jobs-guest/jobs/api/seeMoreJobPostings/search?keywords={query.replace(' ', '%20')}&location={country_name}&start=0"
             logger.info(f"LinkedIn: Scraping {country_name} - {query}")
-            resp = safe_request(url, delay=3)
+            resp = safe_request(url, delay=3, domain='linkedin.com')
             if not resp:
                 continue
 
@@ -365,16 +446,14 @@ def scrape_linkedin(profile):
     return jobs
 
 
-# ==================== MONSTER SCRAPER ====================
+# ==================== MONSTER SCRAPER (Playwright) ====================
 def scrape_monster(profile):
-    """Scrape Monster.com for matching jobs."""
+    """Scrape Monster.com for matching jobs using headless browser."""
     jobs = []
     search_queries = [
-        'project-director-construction',
-        'senior-project-manager-infrastructure',
-        'construction-manager-water',
-        'project-director-utilities',
-        'senior-project-manager-water-wastewater',
+        'project director construction',
+        'senior project manager infrastructure',
+        'construction manager water',
     ]
     locations = [
         ('UAE', 'UAE'),
@@ -386,31 +465,32 @@ def scrape_monster(profile):
 
     for query in search_queries:
         for country_name, loc_query in locations:
-            url = f"https://www.monster.com/jobs/search?q={query}&where={loc_query.replace(' ', '+')}"
+            url = f"https://www.monster.com/jobs/search?q={query.replace(' ', '+')}&where={loc_query.replace(' ', '+')}"
             logger.info(f"Monster: Scraping {url}")
-            resp = safe_request(url, delay=3)
-            if not resp:
+            html = browser_get_page(url, wait_selector='[data-testid="svx_jobCard"], article[class*="JobCard"]')
+            if not html:
                 continue
 
-            soup = BeautifulSoup(resp.text, 'lxml')
-            listings = soup.select('[data-testid="svx-job-card"], .job-cardstyle__JobCardComponent, article[class*="JobCard"], div[class*="job-search-card"]')
+            soup = BeautifulSoup(html, 'lxml')
+            listings = soup.select('[data-testid="svx_jobCard"], [data-testid="svx-job-card"], article[class*="JobCard"]')
 
             if not listings:
+                # Fallback: look for job card links
                 listings = soup.select('a[href*="/job-openings/"]')
 
             for item in listings[:15]:
                 try:
-                    title_el = item.select_one('h2, [data-testid="jobTitle"], .title a, a[class*="title"]')
+                    title_el = item.select_one('[data-testid="svx_jobCard-title"], [data-testid="jobTitle"], h2, h3')
                     if not title_el:
                         continue
                     title = title_el.get_text(strip=True)
                     if not title or len(title) < 5:
                         continue
 
-                    company_el = item.select_one('[data-testid="company"], .company span, span[class*="company"]')
+                    company_el = item.select_one('[data-testid="svx_jobCard-company"], [data-testid="company"], span[class*="company"]')
                     company = company_el.get_text(strip=True) if company_el else 'Confidential'
 
-                    location_el = item.select_one('[data-testid="jobLocation"], .location, span[class*="location"]')
+                    location_el = item.select_one('[data-testid="svx_jobCard-location"], [data-testid="jobLocation"], span[class*="location"]')
                     location = location_el.get_text(strip=True) if location_el else country_name
 
                     link = ''
@@ -439,6 +519,7 @@ def scrape_monster(profile):
                         })
                 except Exception as e:
                     logger.debug(f"Error parsing Monster listing: {e}")
+            time.sleep(2)
 
     logger.info(f"Monster: Found {len(jobs)} matching jobs")
     return jobs
@@ -559,6 +640,10 @@ def main():
         json.dump({'newJobs': output_jobs}, f, indent=2, ensure_ascii=False)
 
     logger.info(f"Saved {len(output_jobs)} new jobs to {OUTPUT_FILE}")
+
+    # Clean up Playwright browser
+    close_browser()
+
     return output_jobs
 
 
